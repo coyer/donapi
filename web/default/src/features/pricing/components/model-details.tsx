@@ -1,3 +1,21 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
@@ -24,6 +42,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CopyButton } from '@/components/copy-button'
+import { sideDrawerContentClassName } from '@/components/drawer-layout'
 import { GroupBadge } from '@/components/group-badge'
 import { PublicLayout } from '@/components/layout'
 import { getPerfMetrics } from '@/features/performance-metrics/api'
@@ -249,8 +268,9 @@ function OverviewSummaryGrid(props: { model: PricingModel }) {
 function ModelHeader(props: { model: PricingModel }) {
   const { t } = useTranslation()
   const model = props.model
-  const vendorIcon = model.vendor_icon
-    ? getLobeIcon(model.vendor_icon, 20)
+  const modelIconKey = model.icon || model.vendor_icon
+  const modelIcon = modelIconKey
+    ? getLobeIcon(modelIconKey, 20)
     : null
   const description = model.description || model.vendor_description || null
   const tags = parseTags(model.tags)
@@ -262,7 +282,7 @@ function ModelHeader(props: { model: PricingModel }) {
   return (
     <header className='pb-4'>
       <div className='flex items-center gap-2.5'>
-        {vendorIcon}
+        {modelIcon}
         <h1 className='font-mono text-xl font-bold tracking-tight sm:text-2xl'>
           {model.model_name}
         </h1>
@@ -717,7 +737,7 @@ function GroupPricingSection(props: {
 
                         return (
                           <TableRow key={`${group}-${tier.label || tierIndex}`}>
-                            <TableCell className='text-muted-foreground py-2.5 text-xs'>
+                            <TableCell className='text-muted-foreground py-2.5'>
                               {tier.label || t('Default')}
                             </TableCell>
                             {priceFields.map((fieldEntry) => {
@@ -790,7 +810,7 @@ function GroupPricingSection(props: {
                   <TableCell className='py-2.5'>
                     <GroupBadge group={group} size='sm' />
                   </TableCell>
-                  <TableCell className='text-muted-foreground py-2.5 font-mono text-xs'>
+                  <TableCell className='text-muted-foreground py-2.5 font-mono'>
                     {ratio}x
                   </TableCell>
                   {isTokenBased ? (
@@ -902,17 +922,17 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
       <ModelHeader model={props.model} />
 
       <Tabs defaultValue='overview' className='gap-4'>
-        <TabsList className='bg-muted/60 h-auto w-full justify-start gap-1 overflow-x-auto rounded-lg p-1'>
+        <TabsList className='bg-muted/60 grid w-full grid-cols-3 gap-1 rounded-lg p-1 group-data-horizontal/tabs:h-auto'>
           {TAB_VALUES.map((value) => {
             const Icon = TAB_META[value].icon
             return (
               <TabsTrigger
                 key={value}
                 value={value}
-                className='h-8 gap-1.5 rounded-md px-3 text-xs sm:text-sm'
+                className='h-8 min-w-0 gap-1.5 rounded-md px-3 text-xs sm:text-sm'
               >
                 <Icon className='size-3.5' />
-                <span>{t(TAB_META[value].labelKey)}</span>
+                <span className='truncate'>{t(TAB_META[value].labelKey)}</span>
               </TabsTrigger>
             )
           })}
@@ -988,7 +1008,9 @@ export function ModelDetailsDrawer(props: ModelDetailsDrawerProps) {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side='right'
-        className='flex h-dvh w-full overflow-hidden p-0 sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl 2xl:max-w-5xl'
+        className={sideDrawerContentClassName(
+          'sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl 2xl:max-w-5xl'
+        )}
       >
         <SheetHeader className='sr-only'>
           <SheetTitle>{props.model.model_name}</SheetTitle>

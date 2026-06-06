@@ -1,3 +1,21 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import { useMemo } from 'react'
 import { VChart } from '@visactor/react-vchart'
 import { useTranslation } from 'react-i18next'
@@ -29,6 +47,19 @@ function formatDayLabel(date: string): string {
   })
 }
 
+function getChartThemeTokens(resolvedTheme: string) {
+  return {
+    textColor:
+      resolvedTheme === 'dark'
+        ? 'rgba(255, 255, 255, 0.68)'
+        : 'rgba(15, 23, 42, 0.58)',
+    gridColor:
+      resolvedTheme === 'dark'
+        ? 'rgba(255, 255, 255, 0.12)'
+        : 'rgba(15, 23, 42, 0.12)',
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Latency trend chart (24h, multi-group point-line chart)
 // ---------------------------------------------------------------------------
@@ -39,6 +70,7 @@ export function LatencyTrendChart(props: {
 }) {
   const { t } = useTranslation()
   const { resolvedTheme, themeReady } = useChartTheme()
+  const { textColor, gridColor } = getChartThemeTokens(resolvedTheme)
 
   const spec = useMemo(() => {
     if (props.series.length === 0) return null
@@ -77,7 +109,7 @@ export function LatencyTrendChart(props: {
         {
           orient: 'bottom',
           label: {
-            style: { fill: 'currentColor', fontSize: 10 },
+            style: { fill: textColor, fontSize: 10 },
           },
           tick: { visible: false },
         },
@@ -85,13 +117,16 @@ export function LatencyTrendChart(props: {
           orient: 'left',
           label: {
             formatMethod: (val: number | string) => `${val} ms`,
-            style: { fill: 'currentColor', fontSize: 10 },
+            style: { fill: textColor, fontSize: 10 },
           },
-          grid: { visible: true, style: { lineDash: [3, 3] } },
+          grid: {
+            visible: true,
+            style: { lineDash: [3, 3], stroke: gridColor },
+          },
         },
       ],
     }
-  }, [props.series, t])
+  }, [gridColor, props.series, t, textColor])
 
   if (props.series.length === 0) {
     return (
@@ -133,6 +168,7 @@ export function UptimeTrendChart(props: {
 }) {
   const { t } = useTranslation()
   const { resolvedTheme, themeReady } = useChartTheme()
+  const { textColor, gridColor } = getChartThemeTokens(resolvedTheme)
 
   const spec = useMemo(() => {
     if (props.series.length === 0) return null
@@ -189,7 +225,7 @@ export function UptimeTrendChart(props: {
         {
           orient: 'bottom',
           label: {
-            style: { fill: 'currentColor', fontSize: 10 },
+            style: { fill: textColor, fontSize: 10 },
             autoLimit: true,
           },
           tick: { visible: false },
@@ -200,13 +236,16 @@ export function UptimeTrendChart(props: {
           max: 100,
           label: {
             formatMethod: (val: number | string) => `${val}%`,
-            style: { fill: 'currentColor', fontSize: 10 },
+            style: { fill: textColor, fontSize: 10 },
           },
-          grid: { visible: true, style: { lineDash: [3, 3] } },
+          grid: {
+            visible: true,
+            style: { lineDash: [3, 3], stroke: gridColor },
+          },
         },
       ],
     }
-  }, [props.series, t])
+  }, [gridColor, props.series, t, textColor])
 
   if (props.series.length === 0) {
     return (
@@ -248,6 +287,7 @@ export function ThroughputBarChart(props: {
 }) {
   const { t } = useTranslation()
   const { resolvedTheme, themeReady } = useChartTheme()
+  const { textColor, gridColor } = getChartThemeTokens(resolvedTheme)
   const { customization } = useThemeCustomization()
   const barRadius = useThemeRadiusPx(
     '--radius-sm',
@@ -276,19 +316,22 @@ export function ThroughputBarChart(props: {
       label: {
         visible: true,
         position: 'right',
-        style: { fontSize: 11, fill: 'currentColor' },
+        style: { fontSize: 11, fill: textColor },
         formatMethod: (text: string) => `${text} t/s`,
       },
       axes: [
         {
           orient: 'left',
-          label: { style: { fill: 'currentColor', fontSize: 10 } },
+          label: { style: { fill: textColor, fontSize: 10 } },
           tick: { visible: false },
         },
         {
           orient: 'bottom',
-          label: { style: { fill: 'currentColor', fontSize: 10 } },
-          grid: { visible: true, style: { lineDash: [3, 3] } },
+          label: { style: { fill: textColor, fontSize: 10 } },
+          grid: {
+            visible: true,
+            style: { lineDash: [3, 3], stroke: gridColor },
+          },
         },
       ],
       tooltip: {
@@ -304,7 +347,7 @@ export function ThroughputBarChart(props: {
         },
       },
     }
-  }, [barRadius, filtered, t])
+  }, [barRadius, filtered, gridColor, t, textColor])
 
   if (filtered.length === 0) {
     return null

@@ -1,3 +1,21 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import { ChannelAffinitySection } from '../general/channel-affinity'
 import { IoNetDeploymentSettingsSection } from '../integrations/ionet-deployment-settings-section'
 import type { ModelSettings } from '../types'
@@ -21,7 +39,6 @@ const MODELS_SECTIONS = [
   {
     id: 'global',
     titleKey: 'Global Model Configuration',
-    descriptionKey: 'Configure global model settings',
     build: (settings: ModelSettings) => (
       <GlobalSettingsCard
         defaultValues={{
@@ -50,7 +67,6 @@ const MODELS_SECTIONS = [
   {
     id: 'gemini',
     titleKey: 'Gemini',
-    descriptionKey: 'Configure Gemini model settings',
     build: (settings: ModelSettings) => (
       <GeminiSettingsCard
         defaultValues={{
@@ -75,7 +91,6 @@ const MODELS_SECTIONS = [
   {
     id: 'claude',
     titleKey: 'Claude',
-    descriptionKey: 'Configure Claude model settings',
     build: (settings: ModelSettings) => (
       <ClaudeSettingsCard
         defaultValues={{
@@ -94,7 +109,6 @@ const MODELS_SECTIONS = [
   {
     id: 'grok',
     titleKey: 'Grok',
-    descriptionKey: 'Configure xAI Grok model settings',
     build: (settings: ModelSettings) => (
       <GrokSettingsCard
         defaultValues={{
@@ -109,7 +123,6 @@ const MODELS_SECTIONS = [
   {
     id: 'channel-affinity',
     titleKey: 'Channel Affinity',
-    descriptionKey: 'Configure channel affinity (sticky routing) rules',
     build: (settings: ModelSettings) => (
       <ChannelAffinitySection
         defaultValues={{
@@ -117,6 +130,8 @@ const MODELS_SECTIONS = [
             settings['channel_affinity_setting.enabled'],
           'channel_affinity_setting.switch_on_success':
             settings['channel_affinity_setting.switch_on_success'],
+          'channel_affinity_setting.keep_on_channel_disabled':
+            settings['channel_affinity_setting.keep_on_channel_disabled'],
           'channel_affinity_setting.max_entries':
             settings['channel_affinity_setting.max_entries'],
           'channel_affinity_setting.default_ttl_seconds':
@@ -130,7 +145,6 @@ const MODELS_SECTIONS = [
   {
     id: 'model-deployment',
     titleKey: 'Model Deployment',
-    descriptionKey: 'Configure model deployment provider settings',
     build: (settings: ModelSettings) => (
       <IoNetDeploymentSettingsSection
         defaultValues={{
@@ -155,3 +169,4 @@ export const MODELS_SECTION_IDS = modelsRegistry.sectionIds
 export const MODELS_DEFAULT_SECTION = modelsRegistry.defaultSection
 export const getModelsSectionNavItems = modelsRegistry.getSectionNavItems
 export const getModelsSectionContent = modelsRegistry.getSectionContent
+export const getModelsSectionMeta = modelsRegistry.getSectionMeta
