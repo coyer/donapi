@@ -104,7 +104,7 @@ const OPERATIONS_SECTIONS = [
   },
   {
     id: 'audit',
-    titleKey: 'Security Audit Settings',
+    titleKey: 'Security Audit',
     build: (settings: OperationsSettings) => (
       <AuditSettingsSection
         defaultValues={{
