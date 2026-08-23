@@ -125,6 +125,7 @@ export type AuthSettings = {
   PasswordRegisterEnabled: boolean
   EmailVerificationEnabled: boolean
   RegisterEnabled: boolean
+  UserInviteEnabled: boolean
   EmailDomainRestrictionEnabled: boolean
   EmailAliasRestrictionEnabled: boolean
   EmailDomainWhitelist: string
@@ -366,6 +367,12 @@ export type OperationsSettings = {
   'perf_metrics_setting.flush_interval': number
   'perf_metrics_setting.bucket_time': 'hour' | 'minute' | '5min'
   'perf_metrics_setting.retention_days': number
+  'audit_setting.mode': 'disabled' | 'local' | 'remote'
+  'audit_setting.remote_endpoint': string
+  'audit_setting.remote_timeout': number
+  'audit_setting.remote_api_key': string
+  'audit_setting.max_file_size': number
+  'audit_setting.retention_days': number
 }
 
 export type SecuritySettings = {

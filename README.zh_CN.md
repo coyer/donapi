@@ -500,3 +500,48 @@ Token、Origin 校验和 PAT 契约见[用户鉴权与登录会话](./docs/authe
 <sub>Built with ❤️ by QuantumNous</sub>
 
 </div>
+
+---
+
+### 🛠️ 编译命令
+
+本项目由前端（`web/`，React 19 + Rsbuild + Bun）和后端（Go）组成，推荐编译流程如下：
+
+**方式一：Linux / macOS / Git Bash**
+```bash
+# 1. 编译前端
+cd web
+bun install
+bun run build
+cd ..
+
+# 2. 编译 Go 后端（会自动嵌入 web/dist 构建产物）
+go build -o new-api main.go
+
+# 3. 运行
+./new-api
+```
+
+**方式二：Windows PowerShell**
+```powershell
+# 1. 编译前端
+cd web
+bun install
+bun run build
+cd ..
+
+# 2. 编译 Go 后端
+go build -o new-api.exe main.go
+
+# 3. 运行
+.\new-api.exe
+```
+
+**开发模式：**
+```bash
+# 终端 A：启动前端开发服务器
+cd web && bun run dev
+
+# 终端 B：启动后端 API（默认会启用嵌入前端，开发模式下也可以只开后端）
+go run main.go
+```

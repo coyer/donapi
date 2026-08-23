@@ -56,6 +56,12 @@ const defaultOperationsSettings: OperationsSettings = {
   'perf_metrics_setting.flush_interval': 5,
   'perf_metrics_setting.bucket_time': 'hour',
   'perf_metrics_setting.retention_days': 0,
+  'audit_setting.mode': 'disabled',
+  'audit_setting.remote_endpoint': '',
+  'audit_setting.remote_timeout': 30,
+  'audit_setting.remote_api_key': '',
+  'audit_setting.max_file_size': 10,
+  'audit_setting.retention_days': 30,
 }
 
 export function OperationsSettings() {

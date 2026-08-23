@@ -20,6 +20,7 @@ import { SystemBehaviorSection } from '../general/system-behavior-section'
 import { EmailSettingsSection } from '../integrations/email-settings-section'
 import { MonitoringSettingsSection } from '../integrations/monitoring-settings-section'
 import { WorkerSettingsSection } from '../integrations/worker-settings-section'
+import { AuditSettingsSection } from '../maintenance/audit-settings-section'
 import { LogSettingsSection } from '../maintenance/log-settings-section'
 import { PerformanceSection } from '../maintenance/performance-section'
 import { UpdateCheckerSection } from '../maintenance/update-checker-section'
@@ -98,6 +99,27 @@ const OPERATIONS_SECTIONS = [
     build: (settings: OperationsSettings) => (
       <LogSettingsSection
         defaultEnabled={Boolean(settings.LogConsumeEnabled)}
+      />
+    ),
+  },
+  {
+    id: 'audit',
+    titleKey: 'Security Audit Settings',
+    build: (settings: OperationsSettings) => (
+      <AuditSettingsSection
+        defaultValues={{
+          'audit_setting.mode': settings['audit_setting.mode'] ?? 'disabled',
+          'audit_setting.remote_endpoint':
+            settings['audit_setting.remote_endpoint'] ?? '',
+          'audit_setting.remote_timeout':
+            settings['audit_setting.remote_timeout'] ?? 30,
+          'audit_setting.remote_api_key':
+            settings['audit_setting.remote_api_key'] ?? '',
+          'audit_setting.max_file_size':
+            settings['audit_setting.max_file_size'] ?? 10,
+          'audit_setting.retention_days':
+            settings['audit_setting.retention_days'] ?? 30,
+        }}
       />
     ),
   },
