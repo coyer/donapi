@@ -2,499 +2,15 @@ package middleware
 
 import (
 	"bytes"
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"io"
-	"strings"
-	"time"
+	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/service/audit"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/service"
 
-	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 )
-
-func AuditMiddleware() gin.HandlerFunc {
-	auditLogger := audit.GetAuditLogger()
-
-	return func(c *gin.Context) {
-		if !auditLogger.IsEnabled() {
-			c.Next()
-			return
-		}
-
-		startTime := time.Now()
-		requestID := c.GetString(common.RequestIdKey)
-
-		var requestBody []byte
-		var files []audit.AuditFile
-		contentType := c.GetHeader("Content-Type")
-
-		if strings.HasPrefix(contentType, "multipart/form-data") {
-			requestBody, files = extractMultipartData(c)
-		} else if c.Request.Body != nil {
-			bodyBytes, err := io.ReadAll(c.Request.Body)
-			if err == nil {
-				requestBody = bodyBytes
-				c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
-				files = extractEmbeddedFiles(bodyBytes)
-
-				if len(files) == 0 && strings.Contains(strings.ToLower(contentType), "json") {
-					common.SysLog(fmt.Sprintf("audit: no embedded files found in JSON request, content-type: %s, body length: %d", contentType, len(bodyBytes)))
-				}
-			} else {
-				common.SysError(fmt.Sprintf("audit: failed to read request body: %v", err))
-			}
-		}
-
-		blw := &bodyLogWriter{body: bytes.NewBufferString(""), ResponseWriter: c.Writer}
-		c.Writer = blw
-
-		c.Next()
-
-		if c.Writer.Status() >= 400 {
-			return
-		}
-
-		tokenKey := common.GetContextKeyString(c, constant.ContextKeyTokenKey)
-		if tokenKey == "" {
-			username := c.GetString("username")
-			if username != "" {
-				tokenKey = fmt.Sprintf("user-%s", username)
-			} else {
-				tokenKey = "anonymous"
-			}
-		}
-
-		record := &audit.AuditRecord{
-			RequestID:   requestID,
-			Timestamp:   startTime,
-			TokenKey:    maskTokenKey(tokenKey),
-			TokenID:     common.GetContextKeyInt(c, constant.ContextKeyTokenId),
-			UserID:      common.GetContextKeyInt(c, constant.ContextKeyUserId),
-			UserEmail:   common.GetContextKeyString(c, constant.ContextKeyUserEmail),
-			Model:       c.GetString("original_model"),
-			RelayMode:   c.GetInt("relay_mode"),
-			RelayFormat: getRelayFormatFromPath(c.Request.URL.Path),
-			RequestBody: json.RawMessage(requestBody),
-			Files:       files,
-			Metadata: map[string]interface{}{
-				"client_ip":      c.ClientIP(),
-				"user_agent":     c.GetHeader("User-Agent"),
-				"request_method": c.Request.Method,
-				"request_path":   c.Request.URL.Path,
-				"status_code":    c.Writer.Status(),
-				"latency_ms":     time.Since(startTime).Milliseconds(),
-				"channel_id":     common.GetContextKeyInt(c, constant.ContextKeyChannelId),
-				"channel_type":   common.GetContextKeyInt(c, constant.ContextKeyChannelType),
-				"channel_name":   common.GetContextKeyString(c, constant.ContextKeyChannelName),
-			},
-		}
-
-		gopool.Go(func() {
-			auditLogger.Log(record)
-		})
-	}
-}
-
-type bodyLogWriter struct {
-	gin.ResponseWriter
-	body *bytes.Buffer
-}
-
-func (w bodyLogWriter) Write(b []byte) (int, error) {
-	w.body.Write(b)
-	return w.ResponseWriter.Write(b)
-}
-
-func extractMultipartData(c *gin.Context) ([]byte, []audit.AuditFile) {
-	var requestBody map[string]interface{} = make(map[string]interface{})
-	var files []audit.AuditFile
-
-	err := c.Request.ParseMultipartForm(32 << 20)
-	if err != nil {
-		return nil, nil
-	}
-
-	if c.Request.MultipartForm != nil {
-		for key, values := range c.Request.MultipartForm.Value {
-			if len(values) == 1 {
-				requestBody[key] = values[0]
-			} else {
-				requestBody[key] = values
-			}
-		}
-
-		setting := operation_setting.GetAuditSetting()
-		maxFileSizeBytes := setting.MaxFileSize * 1024 * 1024
-		for key, fileHeaders := range c.Request.MultipartForm.File {
-			for _, fh := range fileHeaders {
-				file, err := fh.Open()
-				if err != nil {
-					continue
-				}
-				data, err := io.ReadAll(file)
-				file.Close()
-				if err != nil {
-					continue
-				}
-
-				if int64(len(data)) > maxFileSizeBytes {
-					continue
-				}
-
-				files = append(files, audit.AuditFile{
-					Filename:    fh.Filename,
-					ContentType: fh.Header.Get("Content-Type"),
-					Size:        int64(len(data)),
-					Base64Data:  base64.StdEncoding.EncodeToString(data),
-				})
-
-				_ = key
-			}
-		}
-	}
-
-	if model := c.PostForm("model"); model != "" {
-		requestBody["model"] = model
-	}
-
-	jsonData, err := json.Marshal(requestBody)
-	if err != nil {
-		return nil, files
-	}
-	return jsonData, files
-}
-
-func maskTokenKey(key string) string {
-	if key == "" || key == "anonymous" {
-		return "anonymous"
-	}
-	if strings.HasPrefix(key, "user-") {
-		return key
-	}
-	if len(key) <= 8 {
-		return "unknown"
-	}
-	return key[:4] + "_xxxx_" + key[len(key)-4:]
-}
-
-func getRelayFormatFromPath(path string) string {
-	switch {
-	case strings.HasPrefix(path, "/v1/messages"):
-		return "claude"
-	case strings.HasPrefix(path, "/v1beta/"):
-		return "gemini"
-	case strings.HasPrefix(path, "/v1/responses"):
-		return "openai_responses"
-	case strings.HasPrefix(path, "/v1/embeddings"):
-		return "embedding"
-	case strings.HasPrefix(path, "/v1/audio"):
-		return "openai_audio"
-	case strings.HasPrefix(path, "/v1/images"):
-		return "openai_image"
-	case strings.HasPrefix(path, "/v1/rerank"):
-		return "rerank"
-	case strings.HasPrefix(path, "/mj/"):
-		return "mj_proxy"
-	case strings.HasPrefix(path, "/suno/"):
-		return "task"
-	default:
-		return "openai"
-	}
-}
-
-func extractEmbeddedFiles(bodyBytes []byte) []audit.AuditFile {
-	files := make([]audit.AuditFile, 0)
-
-	var req map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &req); err != nil {
-		common.SysError(fmt.Sprintf("audit: failed to unmarshal JSON for file extraction: %v, body preview: %s", err, string(bodyBytes[:min(len(bodyBytes), 200)])))
-		return files
-	}
-
-	messages, ok := req["messages"].([]interface{})
-	if !ok {
-		if _, hasMessages := req["messages"]; !hasMessages {
-			common.SysLog("audit: no 'messages' field in JSON request")
-		} else {
-			common.SysError("audit: 'messages' field is not an array")
-		}
-		return files
-	}
-
-	for msgIdx, msg := range messages {
-		msgMap, ok := msg.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		content, ok := msgMap["content"]
-		if !ok {
-			continue
-		}
-
-		switch c := content.(type) {
-		case string:
-			continue
-		case []interface{}:
-			for itemIdx, item := range c {
-				itemMap, ok := item.(map[string]interface{})
-				if !ok {
-					continue
-				}
-
-				itemType, ok := itemMap["type"].(string)
-				if !ok {
-					continue
-				}
-
-				switch itemType {
-				case "image_url":
-					files = append(files, extractImageFile(itemMap, msgIdx, itemIdx)...)
-				case "file":
-					files = append(files, extractGenericFile(itemMap, msgIdx, itemIdx)...)
-				}
-			}
-		}
-	}
-
-	if len(files) > 0 {
-		common.SysLog(fmt.Sprintf("audit: extracted %d embedded files from request", len(files)))
-	}
-
-	return files
-}
-
-func extractImageFile(itemMap map[string]interface{}, msgIdx, itemIdx int) []audit.AuditFile {
-	files := make([]audit.AuditFile, 0)
-
-	imageURL, ok := itemMap["image_url"].(map[string]interface{})
-	if !ok {
-		common.SysError(fmt.Sprintf("audit: invalid image_url at message[%d].content[%d]", msgIdx, itemIdx))
-		return files
-	}
-
-	url, ok := imageURL["url"].(string)
-	if !ok {
-		common.SysError(fmt.Sprintf("audit: image_url.url is not a string at message[%d].content[%d]", msgIdx, itemIdx))
-		return files
-	}
-
-	if !strings.HasPrefix(url, "data:") {
-		common.SysLog(fmt.Sprintf("audit: image URL is not base64 data URI at message[%d].content[%d]: %s", msgIdx, itemIdx, url[:min(len(url), 50)]))
-		return files
-	}
-
-	parts := strings.SplitN(url, ",", 2)
-	if len(parts) != 2 {
-		common.SysError(fmt.Sprintf("audit: invalid data URL format at message[%d].content[%d]: %s", msgIdx, itemIdx, url[:min(len(url), 100)]))
-		return files
-	}
-
-	mimePart := parts[0]
-	base64Data := parts[1]
-	if !strings.HasSuffix(mimePart, ";base64") {
-		common.SysError(fmt.Sprintf("audit: missing base64 suffix in mime type at message[%d].content[%d]: %s", msgIdx, itemIdx, mimePart))
-		return files
-	}
-
-	mimeType := strings.TrimSuffix(mimePart, ";base64")
-
-	decoded, err := base64.StdEncoding.DecodeString(base64Data)
-	if err != nil {
-		common.SysError(fmt.Sprintf("audit: failed to decode base64 image at message[%d].content[%d]: %v, data length: %d", msgIdx, itemIdx, err, len(base64Data)))
-		return files
-	}
-
-	filename := detectFilenameFromMime(mimeType, msgIdx, itemIdx)
-
-	files = append(files, audit.AuditFile{
-		Filename:    filename,
-		ContentType: mimeType,
-		Size:        int64(len(decoded)),
-		Base64Data:  base64.StdEncoding.EncodeToString(decoded),
-	})
-
-	common.SysLog(fmt.Sprintf("audit: successfully extracted embedded image at message[%d].content[%d], size: %d bytes, type: %s, filename: %s", msgIdx, itemIdx, len(decoded), mimeType, filename))
-
-	return files
-}
-
-func extractGenericFile(itemMap map[string]interface{}, msgIdx, itemIdx int) []audit.AuditFile {
-	files := make([]audit.AuditFile, 0)
-
-	fileObj, ok := itemMap["file"].(map[string]interface{})
-	if !ok {
-		common.SysError(fmt.Sprintf("audit: invalid file object at message[%d].content[%d]", msgIdx, itemIdx))
-		return files
-	}
-
-	fileData, ok := fileObj["file_data"].(string)
-	if !ok {
-		common.SysError(fmt.Sprintf("audit: missing file_data at message[%d].content[%d]", msgIdx, itemIdx))
-		return files
-	}
-
-	mimeType, _ := fileObj["mime_type"].(string)
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-
-	filename, _ := fileObj["filename"].(string)
-	if filename == "" {
-		filename = detectFilenameFromMime(mimeType, msgIdx, itemIdx)
-	}
-
-	decoded, err := base64.StdEncoding.DecodeString(fileData)
-	if err != nil {
-		common.SysError(fmt.Sprintf("audit: failed to decode base64 file at message[%d].content[%d]: %v, data length: %d", msgIdx, itemIdx, err, len(fileData)))
-		return files
-	}
-
-	files = append(files, audit.AuditFile{
-		Filename:    filename,
-		ContentType: mimeType,
-		Size:        int64(len(decoded)),
-		Base64Data:  base64.StdEncoding.EncodeToString(decoded),
-	})
-
-	common.SysLog(fmt.Sprintf("audit: successfully extracted embedded file at message[%d].content[%d], size: %d bytes, type: %s, filename: %s", msgIdx, itemIdx, len(decoded), mimeType, filename))
-
-	return files
-}
-
-func detectFilenameFromMime(mimeType string, msgIdx, itemIdx int) string {
-	ext := ".bin"
-
-	switch mimeType {
-	case "image/png":
-		ext = ".png"
-	case "image/jpeg", "image/jpg":
-		ext = ".jpg"
-	case "image/gif":
-		ext = ".gif"
-	case "image/webp":
-		ext = ".webp"
-	case "image/svg+xml":
-		ext = ".svg"
-	case "application/pdf":
-		ext = ".pdf"
-	case "application/msword":
-		ext = ".doc"
-	case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-		ext = ".docx"
-	case "application/vnd.ms-excel":
-		ext = ".xls"
-	case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-		ext = ".xlsx"
-	case "application/vnd.ms-powerpoint":
-		ext = ".ppt"
-	case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-		ext = ".pptx"
-	case "application/zip":
-		ext = ".zip"
-	case "application/gzip":
-		ext = ".gz"
-	case "application/x-tar":
-		ext = ".tar"
-	case "application/x-7z-compressed":
-		ext = ".7z"
-	case "application/x-rar-compressed":
-		ext = ".rar"
-	case "text/plain":
-		ext = ".txt"
-	case "text/csv":
-		ext = ".csv"
-	case "text/html":
-		ext = ".html"
-	case "text/css":
-		ext = ".css"
-	case "text/markdown":
-		ext = ".md"
-	case "application/json":
-		ext = ".json"
-	case "application/xml", "text/xml":
-		ext = ".xml"
-	case "application/yaml", "text/yaml":
-		ext = ".yaml"
-	case "text/toml":
-		ext = ".toml"
-	case "text/x-c":
-		ext = ".c"
-	case "text/x-csrc":
-		ext = ".c"
-	case "text/x-c++":
-		ext = ".cpp"
-	case "text/x-c++src":
-		ext = ".cpp"
-	case "text/x-chdr":
-		ext = ".h"
-	case "text/x-c++hdr":
-		ext = ".hpp"
-	case "text/x-python":
-		ext = ".py"
-	case "text/x-python-script":
-		ext = ".py"
-	case "application/javascript", "text/javascript":
-		ext = ".js"
-	case "application/typescript", "text/typescript":
-		ext = ".ts"
-	case "application/ecmascript":
-		ext = ".es"
-	case "text/x-java":
-		ext = ".java"
-	case "text/x-java-source":
-		ext = ".java"
-	case "text/x-go":
-		ext = ".go"
-	case "text/x-rust":
-		ext = ".rs"
-	case "text/x-ruby":
-		ext = ".rb"
-	case "application/x-php", "text/x-php":
-		ext = ".php"
-	case "text/x-swift":
-		ext = ".swift"
-	case "text/x-kotlin":
-		ext = ".kt"
-	case "text/x-scala":
-		ext = ".scala"
-	case "text/x-csharp":
-		ext = ".cs"
-	case "text/x-lua":
-		ext = ".lua"
-	case "text/x-perl":
-		ext = ".pl"
-	case "text/x-shellscript", "application/x-sh":
-		ext = ".sh"
-	case "application/x-powershell":
-		ext = ".ps1"
-	case "text/x-makefile":
-		ext = ".mk"
-	case "text/x-dockerfile":
-		ext = ".Dockerfile"
-	case "application/sql":
-		ext = ".sql"
-	case "application/octet-stream":
-		ext = ".bin"
-	}
-
-	return fmt.Sprintf("embedded_file_%d_%d%s", msgIdx, itemIdx, ext)
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 
 // auditResponseWriter 包装 gin.ResponseWriter，捕获响应状态码并将响应体复制一份到
 // 有限大小的缓冲区，用于判断业务是否成功（解析响应 JSON 的 success 字段）。
@@ -548,6 +64,7 @@ var auditRouteActions = map[string]string{
 
 	// 兑换码
 	"PUT /api/redemption/":           "redemption.update",
+	"POST /api/redemption/batch":     "redemption.delete_batch",
 	"DELETE /api/redemption/:id":     "redemption.delete",
 	"DELETE /api/redemption/invalid": "redemption.delete_invalid",
 
@@ -634,7 +151,7 @@ func finishAdminAudit(c *gin.Context, writer *auditResponseWriter) {
 	}
 
 	// op.params 为语言无关参数，供前端 i18n 渲染；generic 时携带 method/route。
-	opParams := map[string]interface{}{}
+	opParams := map[string]any{}
 	if action == "generic" {
 		opParams["method"] = method
 		opParams["route"] = route
@@ -643,26 +160,22 @@ func finishAdminAudit(c *gin.Context, writer *auditResponseWriter) {
 	// content 为英文兜底文本（供导出等非本地化消费者使用）。
 	content := method + " " + route
 
-	adminInfo := map[string]interface{}{
-		"admin_id":       operatorId,
-		"admin_username": operatorName,
-		"admin_role":     operatorRole,
-		"auth_method":    auditAuthMethod(c),
+	adminInfo := &model.AuditAdminInfo{
+		AdminID:       operatorId,
+		AdminUsername: operatorName,
+		AdminRole:     operatorRole,
+		AuthMethod:    auditAuthMethod(c),
 	}
-	auditInfo := map[string]interface{}{
-		"method":  method,
-		"route":   route,
-		"path":    c.Request.URL.Path,
-		"status":  status,
-		"success": success,
-	}
-	if len(routeParams) > 0 {
-		auditInfo["params"] = routeParams
+	auditInfo := &model.AuditRequestInfo{
+		Method:  method,
+		Route:   route,
+		Path:    route,
+		Status:  status,
+		Success: success,
+		Params:  routeParams,
 	}
 
-	gopool.Go(func() {
-		model.RecordOperationAuditLog(operatorId, content, ip, action, opParams, adminInfo, auditInfo)
-	})
+	model.RecordOperationAuditLog(operatorId, operatorRole, content, ip, action, opParams, adminInfo, auditInfo, c)
 }
 
 func auditAuthMethod(c *gin.Context) string {
@@ -688,4 +201,119 @@ func auditResponseSuccess(status int, body []byte) bool {
 		}
 	}
 	return status < 400
+}
+
+const accessTokenAuditContextKey = "access_token_request_audit"
+
+// TokenOperationAudit runs after UserAuth and before endpoint rate limits.
+// Handlers add only allowlisted metadata; neither bodies nor raw errors are persisted.
+func TokenOperationAudit() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var action, content string
+		switch c.Request.Method + " " + c.FullPath() {
+		case "POST /api/token/":
+			action, content = "token.create", "API token creation"
+		case "PUT /api/token/":
+			action, content = "token.update", "API token configuration update"
+			if c.Query("status_only") != "" {
+				action, content = "token.status_update", "API token status update"
+			}
+		case "DELETE /api/token/:id":
+			action, content = "token.delete", "API token deletion"
+		case "POST /api/token/batch":
+			action, content = "token.delete_batch", "API token batch deletion"
+		case "POST /api/token/:id/key":
+			action, content = "token.key_view", "API token key access"
+		case "POST /api/token/batch/keys":
+			action, content = "token.key_view_batch", "API token batch key access"
+		default:
+			c.Next()
+			return
+		}
+
+		params := model.AuditFields{}
+		if id, err := strconv.Atoi(c.Param("id")); err == nil && id > 0 {
+			params["id"] = id
+		}
+		common.SetContextKey(c, constant.ContextKeyTokenAuditParams, params)
+		entry := model.AuditLog{
+			UserId: c.GetInt("id"), Username: c.GetString("username"), ActorRole: c.GetInt("role"),
+			Category: model.AuditCategorySecurity, Action: action, Content: content,
+			Other: model.AuditOther{Op: &model.AuditOperation{Action: action, Params: params}},
+		}
+		writer := &auditResponseWriter{ResponseWriter: c.Writer, body: bytes.NewBuffer(nil), maxSize: 64 * 1024}
+		c.Writer = writer
+		c.Next()
+		entry.Status = writer.Status()
+		entry.Success = auditResponseSuccess(entry.Status, writer.body.Bytes())
+		if writer.body.Len() == writer.maxSize {
+			// JSON may be truncated before its success field. A completed handler
+			// supplies the result without retaining an unbounded response body.
+			entry.Success = entry.Status < 400 && common.GetContextKeyBool(c, constant.ContextKeyTokenAuditSucceeded)
+		}
+		model.RecordAuditLog(c, entry)
+	}
+}
+
+type accessTokenRequestAudit struct {
+	entry  model.AuditLog
+	writer *auditResponseWriter
+}
+
+// AccessTokenAudit also captures public reads and rejections before route-level
+// authentication (for example, rate limiting). It does not grant authentication.
+func AccessTokenAudit() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw, present := authorizationToken(c.GetHeader("Authorization"))
+		if present {
+			_, internal, _ := service.ParseDashboardAccessToken(raw)
+			if !internal {
+				if lookup := lookupAccessToken(c, raw); lookup.user != nil {
+					beginAccessTokenAudit(c, lookup.user, lookup.ref)
+					defer finishAccessTokenAudit(c)
+				}
+			}
+		}
+		c.Next()
+	}
+}
+
+func beginAccessTokenAudit(c *gin.Context, user *model.UserBase, tokenRef string) {
+	if _, exists := c.Get(accessTokenAuditContextKey); exists {
+		return
+	}
+	writer := &auditResponseWriter{ResponseWriter: c.Writer, body: bytes.NewBuffer(nil), maxSize: 64 * 1024}
+	c.Writer = writer
+	c.Set(accessTokenAuditContextKey, &accessTokenRequestAudit{
+		entry:  model.AuditLog{UserId: user.Id, Username: user.Username, ActorRole: user.Role, Category: model.AuditCategoryAccessToken, AuthMethod: "access_token", TokenRef: tokenRef, CreatedAt: common.GetTimestamp(), EventId: common.NewRequestId()},
+		writer: writer,
+	})
+}
+
+// setAccessTokenAuditParam adds non-secret context, such as why a token was
+// rejected, to the current request's access audit entry.
+func setAccessTokenAuditParam(c *gin.Context, key string, value any) {
+	stored, _ := c.Get(accessTokenAuditContextKey)
+	audit, ok := stored.(*accessTokenRequestAudit)
+	if !ok {
+		return
+	}
+	if audit.entry.Other.Op == nil {
+		audit.entry.Other.Op = &model.AuditOperation{Params: model.AuditFields{}}
+	}
+	audit.entry.Other.Op.Params[key] = value
+}
+
+func finishAccessTokenAudit(c *gin.Context) {
+	value, exists := c.Get(accessTokenAuditContextKey)
+	if !exists {
+		return
+	}
+	audit, ok := value.(*accessTokenRequestAudit)
+	if !ok {
+		return
+	}
+	audit.entry.Status = audit.writer.Status()
+	audit.entry.Success = auditResponseSuccess(audit.entry.Status, audit.writer.body.Bytes())
+	model.RecordAuditLog(c, audit.entry)
 }

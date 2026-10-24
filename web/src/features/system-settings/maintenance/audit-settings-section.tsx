@@ -26,7 +26,6 @@ import {
   AlertDescription,
   AlertTitle,
 } from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
@@ -57,20 +56,20 @@ import { useUpdateOption } from '../hooks/use-update-option'
 
 type AuditMode = 'disabled' | 'local' | 'remote'
 
-const createAuditSchema = () =>
-  z.object({
-    'audit_setting.mode': z.enum(['disabled', 'local', 'remote']),
-    'audit_setting.remote_endpoint': z.string(),
-    'audit_setting.remote_timeout': z.coerce.number().int().min(5).max(120),
-    'audit_setting.remote_api_key': z.string(),
-    'audit_setting.max_file_size': z.coerce.number().int().min(1).max(100),
-    'audit_setting.retention_days': z.coerce.number().int().min(1).max(365),
-  })
+const auditSchema = z.object({
+  'audit_setting.mode': z.enum(['disabled', 'local', 'remote']),
+  'audit_setting.remote_endpoint': z.string(),
+  'audit_setting.remote_timeout': z.coerce.number().int().min(5).max(120),
+  'audit_setting.remote_api_key': z.string(),
+  'audit_setting.max_file_size': z.coerce.number().int().min(1).max(100),
+  'audit_setting.retention_days': z.coerce.number().int().min(1).max(365),
+})
 
-type AuditFormValues = z.infer<ReturnType<typeof createAuditSchema>>
+type AuditFormInput = z.input<typeof auditSchema>
+type AuditFormValues = z.output<typeof auditSchema>
 
 type AuditSettingsSectionProps = {
-  defaultValues: AuditFormValues
+  defaultValues: AuditFormInput
 }
 
 export function AuditSettingsSection({
@@ -78,9 +77,8 @@ export function AuditSettingsSection({
 }: AuditSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
-  const auditSchema = createAuditSchema()
 
-  const form = useForm<AuditFormValues>({
+  const form = useForm<AuditFormInput, unknown, AuditFormValues>({
     resolver: zodResolver(auditSchema),
     defaultValues,
   })
@@ -223,7 +221,7 @@ export function AuditSettingsSection({
           </div>
 
           {isLocalMode && (
-            <Alert variant='warning' className='mt-6'>
+            <Alert className='mt-6'>
               <AlertDescription>
                 {t(
                   'Local storage mode: Audit logs will be saved to the logs/audit directory, grouped by token and stored by date. Please ensure sufficient disk space.'
